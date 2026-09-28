@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { createVideoRenderer } from '../rendering/videoRenderer';
+import type { MatchingMode } from '../rendering/videoRenderer';
 
 type VideoPreviewProps = { file: File };
 type Metadata = { width: number; height: number; duration: number };
@@ -7,6 +8,8 @@ type Metadata = { width: number; height: number; duration: number };
 export function VideoPreview({ file }: VideoPreviewProps) {
   const videoRef = useRef<HTMLVideoElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
+  const rendererRef = useRef<ReturnType<typeof createVideoRenderer> | null>(null);
+  const [matchingMode, setMatchingMode] = useState<MatchingMode>('shape');
   const [metadata, setMetadata] = useState<Metadata | null>(null);
   const [error, setError] = useState('');
   const [renderError, setRenderError] = useState('');
@@ -20,10 +23,11 @@ export function VideoPreview({ file }: VideoPreviewProps) {
     // A blob URL lets the browser read this File without uploading or copying it into React state.
     const objectUrl = URL.createObjectURL(file);
     video.src = objectUrl;
-    let disposeRenderer: (() => void) | undefined;
+    let disposeRenderer: ReturnType<typeof createVideoRenderer> | undefined;
     try {
       if (canvasRef.current) {
         disposeRenderer = createVideoRenderer(canvasRef.current, video, setRenderError, () => setRenderError(''));
+        rendererRef.current = disposeRenderer;
       }
     } catch (cause) {
       setRenderError(cause instanceof Error ? cause.message : 'Unable to start WebGL2.');
@@ -31,6 +35,7 @@ export function VideoPreview({ file }: VideoPreviewProps) {
 
     return () => {
       disposeRenderer?.();
+      rendererRef.current = null;
       // Release the media element first, then release the URL's reference to the file.
       video.pause();
       video.removeAttribute('src');
@@ -74,6 +79,17 @@ export function VideoPreview({ file }: VideoPreviewProps) {
         onError={() => setError('This browser could not play the file. Try another MP4 or WebM video.')}
       />
       <canvas ref={canvasRef} className="gpu-preview" role="img" aria-label={`WebGL preview of ${file.name}`} />
+      <div className="matching-control">
+        <label htmlFor="matching-mode">Character matching</label>
+        <select id="matching-mode" value={matchingMode} onChange={(event) => {
+          const mode = event.currentTarget.value as MatchingMode;
+          setMatchingMode(mode);
+          rendererRef.current?.setMode(mode);
+        }}>
+          <option value="shape">Shape + brightness</option>
+          <option value="luminance">Brightness only</option>
+        </select>
+      </div>
       {renderError && <p role="alert" className="render-error error">{renderError}</p>}
       <div className="playback-controls">
         <button className="text-button" disabled={!metadata || !!error || !!renderError} onClick={togglePlayback}>{playing ? 'Pause' : 'Play'}</button>

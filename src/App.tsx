@@ -34,9 +34,9 @@ export default function App() {
       </header>
 
       <section className="intro">
-        <p className="eyebrow">02 / MOTION ON CANVAS</p>
-        <h1>Every frame starts<br />with a video<span className="accent">.</span></h1>
-        <p className="lede">Choose a clip to preview. This is the first step toward turning motion into characters.</p>
+        <p className="eyebrow">03 / MOTION INTO CHARACTERS</p>
+        <h1>Your video.<br />A thousand characters<span className="accent">.</span></h1>
+        <p className="lede">Turn a local clip into colored ASCII, rendered live in your browser.</p>
       </section>
 
       <section className="workspace" aria-label="Video workspace">
@@ -59,7 +59,7 @@ export default function App() {
         </aside>
 
         <div className="preview-panel">
-          <div className="panel-heading"><span>Video preview</span><span className="hint">WEBGL2</span></div>
+          <div className="panel-heading"><span>ASCII preview</span><span className="hint">WEBGL2</span></div>
           {selection ? (
             // A new key remounts the preview, clearing old media status on replacement.
             <VideoPreview key={selection.id} file={selection.file} />
@@ -73,7 +73,7 @@ export default function App() {
         </div>
       </section>
 
-      <footer><span>ON YOUR DEVICE. IN YOUR CONTROL.</span><span>Next up / ASCII rendering</span></footer>
+      <footer><span>ON YOUR DEVICE. IN YOUR CONTROL.</span><span>Next up / Live image controls</span></footer>
     </main>
   );
 }

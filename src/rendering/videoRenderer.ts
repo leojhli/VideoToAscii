@@ -1,20 +1,7 @@
-const vertexSource = `#version 300 es
-precision highp float;
-out vec2 uv;
-void main() {
-  vec2 point = vec2(float((gl_VertexID << 1) & 2), float(gl_VertexID & 2));
-  uv = point;
-  gl_Position = vec4(point * 2.0 - 1.0, 0.0, 1.0);
-}`;
+import { vertexSource, selectionSource, displaySource } from './asciiShaders';
+import { characterGrid, createGlyphAtlas } from './glyphAtlas';
 
-const fragmentSource = `#version 300 es
-precision highp float;
-in vec2 uv;
-uniform sampler2D videoTexture;
-out vec4 color;
-void main() {
-  color = vec4(texture(videoTexture, uv).rgb, 1.0);
-}`;
+export type MatchingMode = 'shape' | 'luminance';
 
 export function createVideoRenderer(
   canvas: HTMLCanvasElement,
@@ -26,7 +13,18 @@ export function createVideoRenderer(
   if (!gl) throw new Error('WebGL2 is unavailable. Enable hardware acceleration or try another browser.');
 
   let program: WebGLProgram | null = null;
+  let selectionProgram: WebGLProgram | null = null;
   let texture: WebGLTexture | null = null;
+  let atlasTexture: WebGLTexture | null = null;
+  let descriptorTexture: WebGLTexture | null = null;
+  let cellTexture: WebGLTexture | null = null;
+  let framebuffer: WebGLFramebuffer | null = null;
+  let cellWidth = 0;
+  let cellHeight = 0;
+  let glyphCount = 0;
+  let mode: MatchingMode = 'shape';
+  let maxTexture = 0;
+  let maxSize = 0;
   let vao: WebGLVertexArrayObject | null = null;
   let callbackId: number | null = null;
   let disposed = false;
@@ -36,11 +34,20 @@ export function createVideoRenderer(
 
   function release() {
     gl!.deleteTexture(texture);
+    gl!.deleteTexture(atlasTexture);
+    gl!.deleteTexture(descriptorTexture);
+    gl!.deleteTexture(cellTexture);
+    gl!.deleteFramebuffer(framebuffer);
     gl!.deleteVertexArray(vao);
     gl!.deleteProgram(program);
+    gl!.deleteProgram(selectionProgram);
     texture = null;
     vao = null;
     program = null;
+    selectionProgram = null;
+    atlasTexture = descriptorTexture = cellTexture = null;
+    framebuffer = null;
+    cellWidth = cellHeight = 0;
   }
 
   function compile(type: number, source: string) {
@@ -56,37 +63,72 @@ export function createVideoRenderer(
     return shader;
   }
 
-  function initialize() {
+  function link(fragment: string) {
     const shaders: WebGLShader[] = [];
+    let result: WebGLProgram | null = null;
     try {
       shaders.push(compile(gl!.VERTEX_SHADER, vertexSource));
-      shaders.push(compile(gl!.FRAGMENT_SHADER, fragmentSource));
-      program = gl!.createProgram();
-      if (!program) throw new Error('Unable to allocate a WebGL program.');
-      shaders.forEach((shader) => gl!.attachShader(program!, shader));
-      gl!.linkProgram(program);
-      if (!gl!.getProgramParameter(program, gl!.LINK_STATUS)) {
-        throw new Error(`WebGL program linking failed: ${gl!.getProgramInfoLog(program) ?? 'unknown error'}`);
+      shaders.push(compile(gl!.FRAGMENT_SHADER, fragment));
+      result = gl!.createProgram();
+      if (!result) throw new Error('Unable to allocate a WebGL program.');
+      shaders.forEach((shader) => gl!.attachShader(result!, shader));
+      gl!.linkProgram(result);
+      if (!gl!.getProgramParameter(result, gl!.LINK_STATUS)) {
+        throw new Error(`WebGL program linking failed: ${gl!.getProgramInfoLog(result) ?? 'unknown error'}`);
       }
-      texture = gl!.createTexture();
-      vao = gl!.createVertexArray();
-      if (!texture || !vao) throw new Error('Unable to allocate WebGL video resources.');
-      gl!.useProgram(program);
-      gl!.bindVertexArray(vao);
-      gl!.activeTexture(gl!.TEXTURE0);
-      gl!.bindTexture(gl!.TEXTURE_2D, texture);
-      gl!.texParameteri(gl!.TEXTURE_2D, gl!.TEXTURE_MIN_FILTER, gl!.LINEAR);
-      gl!.texParameteri(gl!.TEXTURE_2D, gl!.TEXTURE_MAG_FILTER, gl!.LINEAR);
-      gl!.texParameteri(gl!.TEXTURE_2D, gl!.TEXTURE_WRAP_S, gl!.CLAMP_TO_EDGE);
-      gl!.texParameteri(gl!.TEXTURE_2D, gl!.TEXTURE_WRAP_T, gl!.CLAMP_TO_EDGE);
+      return result;
+    } catch (error) {
+      gl!.deleteProgram(result);
+      throw error;
+    } finally {
+      shaders.forEach((shader) => gl!.deleteShader(shader));
+    }
+  }
+
+  function newTexture(unit: number, filter: number) {
+    const result = gl!.createTexture();
+    if (!result) throw new Error('Unable to allocate a WebGL texture.');
+    gl!.activeTexture(gl!.TEXTURE0 + unit);
+    gl!.bindTexture(gl!.TEXTURE_2D, result);
+    gl!.texParameteri(gl!.TEXTURE_2D, gl!.TEXTURE_MIN_FILTER, filter);
+    gl!.texParameteri(gl!.TEXTURE_2D, gl!.TEXTURE_MAG_FILTER, filter);
+    gl!.texParameteri(gl!.TEXTURE_2D, gl!.TEXTURE_WRAP_S, gl!.CLAMP_TO_EDGE);
+    gl!.texParameteri(gl!.TEXTURE_2D, gl!.TEXTURE_WRAP_T, gl!.CLAMP_TO_EDGE);
+    return result;
+  }
+
+  function initialize() {
+    try {
+      selectionProgram = link(selectionSource);
+      program = link(displaySource);
+      maxTexture = gl!.getParameter(gl!.MAX_TEXTURE_SIZE) as number;
+      maxSize = Math.min(gl!.getParameter(gl!.MAX_RENDERBUFFER_SIZE) as number, 4096);
+      const atlas = createGlyphAtlas();
+      glyphCount = atlas.count;
+      texture = newTexture(0, gl!.LINEAR);
+      atlasTexture = newTexture(1, gl!.LINEAR);
       gl!.pixelStorei(gl!.UNPACK_FLIP_Y_WEBGL, true);
-      gl!.uniform1i(gl!.getUniformLocation(program, 'videoTexture'), 0);
+      gl!.texImage2D(gl!.TEXTURE_2D, 0, gl!.RGBA, gl!.RGBA, gl!.UNSIGNED_BYTE, atlas.canvas);
+      descriptorTexture = newTexture(2, gl!.NEAREST);
+      gl!.pixelStorei(gl!.UNPACK_FLIP_Y_WEBGL, false);
+      gl!.texImage2D(gl!.TEXTURE_2D, 0, gl!.RGBA32F, glyphCount, 2, 0, gl!.RGBA, gl!.FLOAT, atlas.descriptors);
+      cellTexture = newTexture(3, gl!.NEAREST);
+      framebuffer = gl!.createFramebuffer();
+      vao = gl!.createVertexArray();
+      if (!framebuffer || !vao) throw new Error('Unable to allocate WebGL ASCII resources.');
+      gl!.disable(gl!.DITHER);
+      gl!.useProgram(selectionProgram);
+      gl!.uniform1i(gl!.getUniformLocation(selectionProgram, 'videoTexture'), 0);
+      gl!.uniform1i(gl!.getUniformLocation(selectionProgram, 'descriptors'), 2);
+      gl!.uniform1i(gl!.getUniformLocation(selectionProgram, 'glyphCount'), glyphCount);
+      gl!.useProgram(program);
+      gl!.uniform1i(gl!.getUniformLocation(program, 'atlas'), 1);
+      gl!.uniform1i(gl!.getUniformLocation(program, 'cells'), 3);
+      gl!.uniform1i(gl!.getUniformLocation(program, 'glyphCount'), glyphCount);
       failed = false;
     } catch (error) {
       release();
       throw error;
-    } finally {
-      shaders.forEach((shader) => gl!.deleteShader(shader));
     }
   }
 
@@ -106,13 +148,11 @@ export function createVideoRenderer(
   function draw() {
     if (disposed || lost || failed || document.hidden || video.readyState < 2 || !video.videoWidth || !video.videoHeight) return;
     try {
-      const maxTexture = gl!.getParameter(gl!.MAX_TEXTURE_SIZE) as number;
       if (video.videoWidth > maxTexture || video.videoHeight > maxTexture) {
         throw new Error('This video exceeds your GPU’s texture size limit. Choose a lower-resolution video.');
       }
       const rect = canvas.getBoundingClientRect();
       const dpr = Math.min(window.devicePixelRatio || 1, 2);
-      const maxSize = Math.min(gl!.getParameter(gl!.MAX_RENDERBUFFER_SIZE) as number, 4096);
       const scale = Math.min(dpr, maxSize / Math.max(rect.width, rect.height, 1));
       const width = Math.max(1, Math.round(rect.width * scale));
       const height = Math.max(1, Math.round(rect.height * scale));
@@ -121,16 +161,37 @@ export function createVideoRenderer(
         canvas.height = height;
       }
 
-      gl!.clearColor(0.03, 0.04, 0.035, 1);
-      gl!.clear(gl!.COLOR_BUFFER_BIT);
       const fit = Math.min(width / video.videoWidth, height / video.videoHeight);
       const viewWidth = Math.max(1, Math.round(video.videoWidth * fit));
       const viewHeight = Math.max(1, Math.round(video.videoHeight * fit));
+      const grid = characterGrid(video.videoWidth, video.videoHeight, Math.min(100, Math.max(1, Math.floor(viewWidth / dpr / 6))));
+      gl!.bindVertexArray(vao);
+      gl!.activeTexture(gl!.TEXTURE0);
+      gl!.bindTexture(gl!.TEXTURE_2D, texture);
+      gl!.pixelStorei(gl!.UNPACK_FLIP_Y_WEBGL, true);
+      gl!.texImage2D(gl!.TEXTURE_2D, 0, gl!.RGBA, gl!.RGBA, gl!.UNSIGNED_BYTE, video);
+      gl!.bindFramebuffer(gl!.FRAMEBUFFER, framebuffer);
+      if (cellWidth !== grid.columns || cellHeight !== grid.rows) {
+        cellWidth = grid.columns;
+        cellHeight = grid.rows;
+        gl!.activeTexture(gl!.TEXTURE0 + 3);
+        gl!.bindTexture(gl!.TEXTURE_2D, cellTexture);
+        gl!.texImage2D(gl!.TEXTURE_2D, 0, gl!.RGBA8, cellWidth, cellHeight, 0, gl!.RGBA, gl!.UNSIGNED_BYTE, null);
+        gl!.framebufferTexture2D(gl!.FRAMEBUFFER, gl!.COLOR_ATTACHMENT0, gl!.TEXTURE_2D, cellTexture, 0);
+        if (gl!.checkFramebufferStatus(gl!.FRAMEBUFFER) !== gl!.FRAMEBUFFER_COMPLETE) throw new Error('Unable to create the ASCII cell framebuffer.');
+      }
+      gl!.viewport(0, 0, cellWidth, cellHeight);
+      gl!.useProgram(selectionProgram);
+      gl!.uniform2f(gl!.getUniformLocation(selectionProgram!, 'grid'), cellWidth, cellHeight);
+      gl!.uniform1i(gl!.getUniformLocation(selectionProgram!, 'shapeMode'), mode === 'shape' ? 1 : 0);
+      gl!.drawArrays(gl!.TRIANGLES, 0, 3);
+
+      gl!.bindFramebuffer(gl!.FRAMEBUFFER, null);
+      gl!.clearColor(0, 0, 0, 1);
+      gl!.clear(gl!.COLOR_BUFFER_BIT);
       gl!.viewport(Math.floor((width - viewWidth) / 2), Math.floor((height - viewHeight) / 2), viewWidth, viewHeight);
       gl!.useProgram(program);
-      gl!.bindVertexArray(vao);
-      gl!.bindTexture(gl!.TEXTURE_2D, texture);
-      gl!.texImage2D(gl!.TEXTURE_2D, 0, gl!.RGBA, gl!.RGBA, gl!.UNSIGNED_BYTE, video);
+      gl!.uniform2f(gl!.getUniformLocation(program!, 'grid'), cellWidth, cellHeight);
       gl!.drawArrays(gl!.TRIANGLES, 0, 3);
     } catch (error) {
       report(error);
@@ -182,7 +243,7 @@ export function createVideoRenderer(
   onReady();
   refresh();
 
-  return () => {
+  const dispose = () => {
     disposed = true;
     cancel();
     observer.disconnect();
@@ -194,4 +255,5 @@ export function createVideoRenderer(
     canvas.removeEventListener('webglcontextrestored', contextRestored);
     release();
   };
+  return Object.assign(dispose, { setMode(next: MatchingMode) { mode = next; draw(); } });
 }
