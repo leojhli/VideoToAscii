@@ -1,0 +1,63 @@
+:root {
+  font-family: Inter, "Segoe UI", Arial, sans-serif;
+  color: #e8ece6;
+  background: #111413;
+  font-synthesis: none;
+  text-rendering: optimizeLegibility;
+  -webkit-font-smoothing: antialiased;
+}
+* { box-sizing: border-box; }
+body { margin: 0; min-width: 320px; }
+button, input { font: inherit; }
+a { color: inherit; text-decoration: none; }
+button, input[type="file"]::file-selector-button { cursor: pointer; }
+:focus-visible { outline: 2px solid #c6f782; outline-offset: 5px; }
+.app-shell { max-width: 1280px; margin: auto; padding: 0 48px; }
+.masthead { display: flex; justify-content: space-between; align-items: center; padding: 30px 0; border-bottom: 1px solid #303731; gap: 16px; }
+.wordmark { font-size: 13px; font-weight: 700; letter-spacing: 2px; }
+.wordmark span { color: #c6f782; font-family: monospace; margin-right: 12px; font-size: 24px; }
+.badge, .eyebrow, footer, .panel-heading, .preview-status { font-family: "Cascadia Code", Consolas, monospace; font-size: 11px; letter-spacing: 1px; }
+.badge { border: 1px solid #3a4537; padding: 8px 10px; color: #c6f782; }
+.intro { padding: 60px 0 40px; }
+.eyebrow { color: #a5b19e; margin: 0 0 20px; }
+h1 { font-size: clamp(36px, 5.5vw, 66px); line-height: 1.05; letter-spacing: -3px; font-weight: 500; margin: 0; }
+.accent { color: #c6f782; }
+.lede { max-width: 470px; color: #a7b0a9; line-height: 1.7; margin-top: 22px; }
+.workspace { display: grid; grid-template-columns: 290px minmax(0, 1fr); border: 1px solid #343d35; border-radius: 10px; overflow: hidden; background: #181d19; }
+.source-panel { padding: 28px; border-right: 1px solid #343d35; }
+h2 { font-size: 18px; font-weight: 500; margin: 0 0 14px; }
+.source-panel p, .empty-preview p { color: #a7b0a9; font-size: 14px; line-height: 1.7; }
+.source-panel .eyebrow { font-size: 11px; }
+.file-label { display: block; font-size: 13px; margin: 25px 0 10px; }
+input[type="file"] { width: 100%; color: #a7b0a9; font-size: 12px; }
+input[type="file"]::file-selector-button { display: block; border: 0; border-radius: 5px; background: #c6f782; color: #182010; padding: 12px 22px; margin-bottom: 10px; font-weight: 600; width: 100%; }
+input[type="file"]::file-selector-button:hover { background: #d6ffa6; }
+.hint, .source-panel .hint { font-size: 11px; color: #98a49a; line-height: 1.6; }
+.file-details { display: grid; gap: 12px; margin-top: 28px; padding-top: 24px; border-top: 1px solid #343d35; font-size: 12px; color: #a7b0a9; }
+.file-details .eyebrow { margin: 0; }
+.file-details strong { color: #e8ece6; font-weight: 500; overflow-wrap: anywhere; }
+.text-button { background: transparent; color: #c6f782; border: 1px solid #46563c; border-radius: 4px; padding: 8px; }
+.panel-heading { padding: 18px 24px; display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid #343d35; }
+.empty-preview { min-height: 360px; display: flex; flex-direction: column; justify-content: center; align-items: center; background: radial-gradient(ellipse at center, #232d23, #141815); text-align: center; padding: 24px; }
+.empty-symbol { font: 50px monospace; color: #718564; margin-bottom: 30px; }
+.empty-preview p { margin: 0; }
+.gpu-preview { display: block; width: 100%; height: 340px; background: #080b09; }
+.playback-controls { display: flex; align-items: center; gap: 12px; padding: 12px 20px; font-size: 12px; }
+.playback-controls input { flex: 1; min-width: 0; accent-color: #c6f782; }
+.playback-controls button { min-width: 65px; }
+button:disabled, input:disabled { opacity: .45; cursor: not-allowed; }
+.render-error { padding: 0 20px; font-size: 13px; }
+.preview-status { padding: 15px 20px; display: flex; gap: 16px; justify-content: space-between; color: #a7b0a9; font-size: 10px; }
+.error, .source-panel .error { color: #ffb2a2; }
+footer { display: flex; justify-content: space-between; gap: 20px; padding: 30px 0; color: #98a49a; font-size: 10px; }
+@media (max-width: 760px) {
+  .app-shell { padding: 0 20px; }
+  .badge { display: none; }
+  .intro { padding-top: 40px; }
+  h1 { letter-spacing: -1.5px; }
+  .workspace { grid-template-columns: 1fr; }
+  .source-panel { border-right: 0; border-bottom: 1px solid #343d35; }
+  .empty-preview { min-height: 260px; }
+  .gpu-preview { height: 260px; }
+  .preview-status, footer { flex-wrap: wrap; }
+}
