@@ -5,6 +5,7 @@ import type { VideoAsciiHandle } from './VideoAscii';
 import { DEFAULT_SETTINGS } from '../rendering/settings';
 import { AsciiControls } from './AsciiControls';
 import { readableGrid } from '../rendering/glyphAtlas';
+import { VideoExport } from './VideoExport';
 
 type VideoPreviewProps = { file: File };
 type Metadata = { width: number; height: number; duration: number };
@@ -36,10 +37,9 @@ export function VideoPreview({ file }: VideoPreviewProps) {
     const updateLimit = () => {
       const canvas = stageRef.current?.querySelector('canvas');
       if (!canvas) return;
-      const rect = canvas.getBoundingClientRect();
-      const toolbar = stageRef.current?.querySelector('.stage-toolbar')?.getBoundingClientRect().height ?? 50;
-      const width = fullscreen ? rect.width : (window.screen.width || window.innerWidth);
-      const height = fullscreen ? rect.height : Math.max(1, (window.screen.height || window.innerHeight) - toolbar);
+      const toolbar = 64; // Stable reserve: entering fullscreen must not change the grid.
+      const width = window.screen.width || window.innerWidth;
+      const height = Math.max(1, (window.screen.height || window.innerHeight) - toolbar);
       const limit = readableGrid(metadata.width, metadata.height, 500, width, height).columns;
       const previousLimit = maxColumnsRef.current;
       maxColumnsRef.current = limit;
@@ -60,7 +60,7 @@ export function VideoPreview({ file }: VideoPreviewProps) {
       window.screen.orientation?.removeEventListener('change', updateLimit);
       observer?.disconnect();
     };
-  }, [metadata, fullscreen]);
+  }, [metadata]);
 
   useEffect(() => {
     const syncFullscreen = () => setFullscreen(document.fullscreenElement === stageRef.current);
@@ -117,10 +117,11 @@ export function VideoPreview({ file }: VideoPreviewProps) {
           onChange={(event) => { const time = Number(event.currentTarget.value); playerRef.current?.seek(time); setCurrentTime(time); }} />
         <span>{currentTime.toFixed(1)}s</span>
       </div>
-      {grid && <p className="grid-status hint">Character grid: {grid.columns} × {grid.rows}{grid.columns < settings.columns ? ` · ${settings.columns} requested; limited to fit readable characters` : ''}</p>}
+      {grid && <p className="grid-status hint">Character grid: {grid.columns} × {grid.rows} · Same grid in fullscreen and export</p>}
       <AsciiControls settings={settings} maxColumns={maxColumns} onChange={setSettings} onReset={() => {
         setSettings({ ...DEFAULT_SETTINGS, columns: Math.min(DEFAULT_SETTINGS.columns, maxColumns) }); setMatchingMode('shape');
       }} />
+      <VideoExport src={src} fileName={file.name} settings={settings} matchingMode={matchingMode} disabled={!metadata || !!error} />
       <div className="preview-status" role="status">
         {error ? <span className="error">{error}</span> : metadata ? (
           <span>{metadata.width} × {metadata.height} px · {Number.isFinite(metadata.duration) ? `${metadata.duration.toFixed(1)} seconds` : 'Duration unavailable'}</span>

@@ -24,7 +24,7 @@ export function AsciiControls({ settings, maxColumns, onChange, onReset }: Props
             onChange={(event) => onChange({ ...settings, [key]: Number(event.currentTarget.value) })} />
         </div>)}
       </div>
-      <p className="hint">Fullscreen maximum: {maxColumns} columns on this screen. The smaller preview may use fewer columns to keep characters readable.</p>
+      <p className="hint">Fullscreen maximum: {maxColumns} columns on this screen. The character count stays fixed; characters appear smaller in the normal preview.</p>
       <div className="color-controls">
         <label>Color mode <select value={settings.colorMode} onChange={(event) => onChange({ ...settings, colorMode: event.currentTarget.value as AsciiSettings['colorMode'] })}>
           <option value="color">Original color</option><option value="monochrome">Monochrome</option>

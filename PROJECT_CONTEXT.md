@@ -2,6 +2,14 @@
 
 ## Goal and learning agreement
 
+Latest verification: 40 unit tests and production build pass. The Edge integration test passes fixed-grid inline/fullscreen/resize checks, real export decoding and colored-glyph pixel checks, download filename, cancellation, context recovery, and standalone/offscreen behavior. Firefox/Safari export remains unverified. README documents export constraints and the revised resolution behavior. No commit or push performed.
+
+Latest Edge run printed its passing test result (39.7 seconds), but runner shutdown did not promptly return; distinguish passing browser assertions from a clean runner exit.
+
+Latest follow-up (supersedes historical no-export/readability behavior below): implement local silent video download and identical character counts in fullscreen and inline views. Renderer now uses characterGrid directly, independent of canvas dimensions; the playground slider uses one screen-based maximum with a stable 64px toolbar reserve in both views. Inline characters shrink instead of reducing the grid. Physical screen/orientation changes can still update the maximum.
+
+Export is implemented in src/export/exportVideo.ts and src/components/VideoExport.tsx. Generate records the whole source from the beginning with a snapshot of settings/matching mode, then exposes a Save link. Independent decoder and detached WebGL renderer leave preview state alone. A fixed-size export target and synchronous post-draw callback copy GPU frames into a capture canvas, compositing CSS opacity onto black. Output longest side is 1920 (including upscaling small inputs for glyph clarity), dimensions are even, same character grid, silent, target 30 FPS. MediaRecorder chooses supported VP9/VP8 WebM or MP4. Export is real-time, not a text-file export or an offline frame encoder. Source stays local. Cancellation, hidden tab, decoder/GPU/encoder errors, stalled playback/loading, 512 MB output guard, and unmount all release resources; generated blob URLs are revoked on regeneration/unmount. Keep this tab visible while recording. Changing preview settings during recording affects the next export only.
+
 Build a standalone React playground containing an original reusable video-to-ASCII component for the user's future React portfolio. Implement one milestone at a time. Latest user preference: no tutorials or explanation text files; implement the work and give concise status. This supersedes earlier requests for detailed explanations.
 
 Latest architecture decision: use WebGL2 from the start, not a Canvas 2D ASCII implementation. The reference https://github.com/LucasHJin/react-video-ascii is inspiration, not a dependency. GPU rendering and shape-based glyph matching are implemented as of milestone 3 using an original six-region descriptor approach.
@@ -11,10 +19,16 @@ Latest architecture decision: use WebGL2 from the start, not a Canvas 2D ASCII i
 - Local video selection in the playground; source URL prop in a reusable portfolio component.
 - Live rendering is necessary so portfolio visitors can change columns, brightness, contrast, gamma, opacity, color/monochrome mode, and character set.
 - Muted playback, play/pause, responsive sizing, suitable cleanup and visibility handling.
-- Copy the finished component and source video into the future portfolio. No npm publication, backend, or video export is currently required.
+- Copy the finished component and source video into the future portfolio. No npm publication or backend is required. Video download was added by the latest follow-up request.
 - Final portfolio view displays the ASCII rendering only. Milestone 1 deliberately shows the ordinary source video for learning and verification.
 
-## Current milestone: 5
+## Current milestone: 6 — implementation complete; broader browser verification pending
+
+Milestone 6 adds IntersectionObserver offscreen suspension, zero-area suspension, a 30 FPS playback rendering cap (explicit seeks/settings/resize bypass the cap), reuse of video texture storage with texSubImage2D, skipping repeated uploads for unchanged media timestamps, fallback animation-frame duplicate suppression, cached uniform locations, and idempotent disposal. Observer/callback/resource cleanup and context recovery include the new state. Hidden/offscreen handling stops GPU work but does not pause media decoding. Existing DPR=2, drawing-buffer=4096/device limit, readable columns, and 1,000-row caps remain. The UI no longer advertises an unfinished next milestone.
+
+Verification: 34 unit tests and production build pass. Full Edge browser suite passes including GPU draw instrumentation demonstrating offscreen stop/resume. Playwright configuration includes Edge, Firefox, and WebKit; npm run test:browser selects Edge, npm run test:browser:all selects all. Fixture recording chooses a supported WebM/MP4 codec instead of assuming WebM. Browser tests scroll the canvas into view before readbacks, respecting suspension.
+
+Remaining validation limitation: Playwright requires Firefox revision 1543 and WebKit 2359, but only older 1522/2287 builds were cached. Download attempts through the normal Playwright mirrors timed out. An attempted fallback with explicit old executables failed Firefox protocol negotiation (unexpected isMobile field) and WebKit page setup (unsupported PushAPIEnabled setting); no executable overrides remain in the config. Firefox, WebKit, actual Safari, and target mobile devices are not claimed verified. Retry `npx playwright install firefox webkit` followed by `npm run test:browser:all` when downloads are available. Milestones 1–5 are complete; milestone 6 code and Edge checks are done but cross-browser sign-off is pending.
 
 Milestone 5 is complete. VideoAscii lives in src/components/VideoAscii.tsx with a public entry in src/video-ascii.ts. It owns the hidden video, visible canvas, WebGL lifecycle, errors, and playback. It accepts a required src URL and optional appearance props, matchingMode, autoPlay (default true), loop (default true), paused override, className/style/label, crossOrigin (default anonymous), and callback props. It provides typed play/pause/seek commands through a ref. Its inline sizing fills a parent with defined height without requiring playground CSS. React effects keep appearance/callback updates separate from source lifecycle; source changes and unmount release resources, and stale play-promise rejection is ignored. Empty sources do not request the current page. Remote texture sources require CORS. Caller retains blob URL ownership.
 
@@ -53,7 +67,7 @@ Post-milestone-4 addition: the preview stage has a Fullscreen/Exit fullscreen to
 3. GPU ASCII conversion: glyph atlas, aspect-correct grid, luminance mapping, and shape-aware glyph selection (completed).
 4. Live image controls and playback, including explicit higher resolution (completed).
 5. Extract the reusable component with src/settings props and separate playground UI (completed).
-6. Visibility, resizing, performance caps, context-loss handling, browser validation, and portfolio integration guidance.
+6. Performance/polish and integration guidance (implemented, Edge verified; Firefox/WebKit/device validation pending).
 
 ## Verification
 

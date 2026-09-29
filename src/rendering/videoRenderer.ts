@@ -1,5 +1,5 @@
 import { vertexSource, selectionSource, displaySource } from './asciiShaders';
-import { readableGrid, createGlyphAtlas } from './glyphAtlas';
+import { characterGrid, createGlyphAtlas } from './glyphAtlas';
 import { DEFAULT_SETTINGS, normalizeSettings, rgb } from './settings';
 import type { AsciiSettings } from './settings';
 
@@ -11,6 +11,7 @@ export function createVideoRenderer(
   onError: (message: string) => void,
   onReady: () => void,
   onGrid: (grid: { columns: number; rows: number }) => void = () => {},
+  exportTarget?: { width: number; height: number; onFrame: () => void },
 ) {
   const gl = canvas.getContext('webgl2', { alpha: false, antialias: false });
   if (!gl) throw new Error('WebGL2 is unavailable. Enable hardware acceleration or try another browser.');
@@ -34,7 +35,21 @@ export function createVideoRenderer(
   let disposed = false;
   let lost = false;
   let failed = false;
+  let inView = true;
+  let hasArea = true;
+  let uploadedTime = NaN;
+  let uploadedWidth = 0;
+  let uploadedHeight = 0;
+  let lastTick = -Infinity;
+  const uniforms = new Map<WebGLProgram, Map<string, WebGLUniformLocation | null>>();
   const useVideoCallback = typeof video.requestVideoFrameCallback === 'function';
+
+  function uniform(owner: WebGLProgram, name: string) {
+    let locations = uniforms.get(owner);
+    if (!locations) { locations = new Map(); uniforms.set(owner, locations); }
+    if (!locations.has(name)) locations.set(name, gl!.getUniformLocation(owner, name));
+    return locations.get(name)!;
+  }
 
   function release() {
     gl!.deleteTexture(texture);
@@ -52,6 +67,9 @@ export function createVideoRenderer(
     atlasTexture = descriptorTexture = cellTexture = null;
     framebuffer = null;
     cellWidth = cellHeight = 0;
+    uploadedTime = NaN;
+    uploadedWidth = uploadedHeight = 0;
+    uniforms.clear();
   }
 
   function compile(type: number, source: string) {
@@ -117,13 +135,13 @@ export function createVideoRenderer(
       if (!framebuffer || !vao) throw new Error('Unable to allocate WebGL ASCII resources.');
       gl!.disable(gl!.DITHER);
       gl!.useProgram(selectionProgram);
-      gl!.uniform1i(gl!.getUniformLocation(selectionProgram, 'videoTexture'), 0);
-      gl!.uniform1i(gl!.getUniformLocation(selectionProgram, 'descriptors'), 2);
-      gl!.uniform1i(gl!.getUniformLocation(selectionProgram, 'glyphCount'), glyphCount);
+      gl!.uniform1i(uniform(selectionProgram, 'videoTexture'), 0);
+      gl!.uniform1i(uniform(selectionProgram, 'descriptors'), 2);
+      gl!.uniform1i(uniform(selectionProgram, 'glyphCount'), glyphCount);
       gl!.useProgram(program);
-      gl!.uniform1i(gl!.getUniformLocation(program, 'atlas'), 1);
-      gl!.uniform1i(gl!.getUniformLocation(program, 'cells'), 3);
-      gl!.uniform1i(gl!.getUniformLocation(program, 'glyphCount'), glyphCount);
+      gl!.uniform1i(uniform(program, 'atlas'), 1);
+      gl!.uniform1i(uniform(program, 'cells'), 3);
+      gl!.uniform1i(uniform(program, 'glyphCount'), glyphCount);
       failed = false;
     } catch (error) {
       release();
@@ -158,13 +176,15 @@ export function createVideoRenderer(
   }
 
   function draw() {
-    if (disposed || lost || failed || document.hidden || video.readyState < 2 || !video.videoWidth || !video.videoHeight) return;
+    if (disposed || lost || failed || (!exportTarget && (!inView || document.hidden)) || video.readyState < 2 || !video.videoWidth || !video.videoHeight) return;
     try {
       if (video.videoWidth > maxTexture || video.videoHeight > maxTexture) {
         throw new Error('This video exceeds your GPU’s texture size limit. Choose a lower-resolution video.');
       }
-      const rect = canvas.getBoundingClientRect();
-      const dpr = Math.min(window.devicePixelRatio || 1, 2);
+      const rect = exportTarget ?? canvas.getBoundingClientRect();
+      hasArea = rect.width > 0 && rect.height > 0;
+      if (!hasArea) { cancel(); return; }
+      const dpr = exportTarget ? 1 : Math.min(window.devicePixelRatio || 1, 2);
       const scale = Math.min(dpr, maxSize / Math.max(rect.width, rect.height, 1));
       const width = Math.max(1, Math.round(rect.width * scale));
       const height = Math.max(1, Math.round(rect.height * scale));
@@ -176,13 +196,21 @@ export function createVideoRenderer(
       const fit = Math.min(width / video.videoWidth, height / video.videoHeight);
       const viewWidth = Math.max(1, Math.round(video.videoWidth * fit));
       const viewHeight = Math.max(1, Math.round(video.videoHeight * fit));
-      const grid = readableGrid(video.videoWidth, video.videoHeight, settings.columns, rect.width, rect.height);
+      const grid = characterGrid(video.videoWidth, video.videoHeight, settings.columns);
       canvas.dataset.grid = `${grid.columns} × ${grid.rows}`;
       gl!.bindVertexArray(vao);
       gl!.activeTexture(gl!.TEXTURE0);
       gl!.bindTexture(gl!.TEXTURE_2D, texture);
       gl!.pixelStorei(gl!.UNPACK_FLIP_Y_WEBGL, true);
-      gl!.texImage2D(gl!.TEXTURE_2D, 0, gl!.RGBA, gl!.RGBA, gl!.UNSIGNED_BYTE, video);
+      if (uploadedWidth !== video.videoWidth || uploadedHeight !== video.videoHeight) {
+        gl!.texImage2D(gl!.TEXTURE_2D, 0, gl!.RGBA, gl!.RGBA, gl!.UNSIGNED_BYTE, video);
+        uploadedWidth = video.videoWidth;
+        uploadedHeight = video.videoHeight;
+        uploadedTime = video.currentTime;
+      } else if (uploadedTime !== video.currentTime) {
+        gl!.texSubImage2D(gl!.TEXTURE_2D, 0, 0, 0, gl!.RGBA, gl!.UNSIGNED_BYTE, video);
+        uploadedTime = video.currentTime;
+      }
       gl!.bindFramebuffer(gl!.FRAMEBUFFER, framebuffer);
       if (cellWidth !== grid.columns || cellHeight !== grid.rows) {
         onGrid(grid);
@@ -196,10 +224,10 @@ export function createVideoRenderer(
       }
       gl!.viewport(0, 0, cellWidth, cellHeight);
       gl!.useProgram(selectionProgram);
-      gl!.uniform2f(gl!.getUniformLocation(selectionProgram!, 'grid'), cellWidth, cellHeight);
-      gl!.uniform1i(gl!.getUniformLocation(selectionProgram!, 'shapeMode'), mode === 'shape' ? 1 : 0);
-      gl!.uniform1i(gl!.getUniformLocation(selectionProgram!, 'glyphCount'), glyphCount);
-      for (const name of ['brightness', 'contrast', 'gamma'] as const) gl!.uniform1f(gl!.getUniformLocation(selectionProgram!, name), settings[name]);
+      gl!.uniform2f(uniform(selectionProgram!, 'grid'), cellWidth, cellHeight);
+      gl!.uniform1i(uniform(selectionProgram!, 'shapeMode'), mode === 'shape' ? 1 : 0);
+      gl!.uniform1i(uniform(selectionProgram!, 'glyphCount'), glyphCount);
+      for (const name of ['brightness', 'contrast', 'gamma'] as const) gl!.uniform1f(uniform(selectionProgram!, name), settings[name]);
       gl!.drawArrays(gl!.TRIANGLES, 0, 3);
 
       gl!.bindFramebuffer(gl!.FRAMEBUFFER, null);
@@ -208,25 +236,30 @@ export function createVideoRenderer(
       gl!.clear(gl!.COLOR_BUFFER_BIT);
       gl!.viewport(Math.floor((width - viewWidth) / 2), Math.floor((height - viewHeight) / 2), viewWidth, viewHeight);
       gl!.useProgram(program);
-      gl!.uniform2f(gl!.getUniformLocation(program!, 'grid'), cellWidth, cellHeight);
-      gl!.uniform1i(gl!.getUniformLocation(program!, 'glyphCount'), glyphCount);
-      gl!.uniform1i(gl!.getUniformLocation(program!, 'monochrome'), settings.colorMode === 'monochrome' ? 1 : 0);
-      gl!.uniform3fv(gl!.getUniformLocation(program!, 'foreground'), rgb(settings.foregroundColor));
-      gl!.uniform3fv(gl!.getUniformLocation(program!, 'background'), rgb(settings.backgroundColor));
+      gl!.uniform2f(uniform(program!, 'grid'), cellWidth, cellHeight);
+      gl!.uniform1i(uniform(program!, 'glyphCount'), glyphCount);
+      gl!.uniform1i(uniform(program!, 'monochrome'), settings.colorMode === 'monochrome' ? 1 : 0);
+      gl!.uniform3fv(uniform(program!, 'foreground'), rgb(settings.foregroundColor));
+      gl!.uniform3fv(uniform(program!, 'background'), rgb(settings.backgroundColor));
       gl!.drawArrays(gl!.TRIANGLES, 0, 3);
+      exportTarget?.onFrame();
     } catch (error) {
       report(error);
     }
   }
 
   function schedule() {
-    if (disposed || lost || failed || document.hidden || video.paused || video.ended || callbackId !== null) return;
+    if (disposed || lost || failed || (!exportTarget && (!inView || document.hidden)) || !hasArea || video.paused || video.ended || callbackId !== null) return;
     callbackId = useVideoCallback ? video.requestVideoFrameCallback(tick) : requestAnimationFrame(tick);
   }
 
-  function tick() {
+  function tick(now: number) {
     callbackId = null;
-    draw();
+    // Bound playback work to 30 fps. Explicit seeks/settings/resize still redraw immediately.
+    if (now - lastTick >= 1000 / 30 - 1) {
+      lastTick = now;
+      if (useVideoCallback || video.currentTime !== uploadedTime) draw();
+    }
     schedule();
   }
 
@@ -253,6 +286,12 @@ export function createVideoRenderer(
   initialize();
   const observer = new ResizeObserver(refresh);
   observer.observe(canvas);
+  const intersection = exportTarget || typeof IntersectionObserver === 'undefined' ? null : new IntersectionObserver(([entry]) => {
+    if (disposed || !entry) return;
+    inView = entry.isIntersecting;
+    if (inView) refresh(); else cancel();
+  });
+  intersection?.observe(canvas);
   const refreshEvents = ['loadeddata', 'seeked', 'playing', 'resize'] as const;
   const stopEvents = ['pause', 'ended'] as const;
   refreshEvents.forEach((event) => video.addEventListener(event, refresh));
@@ -265,9 +304,11 @@ export function createVideoRenderer(
   refresh();
 
   const dispose = () => {
+    if (disposed) return;
     disposed = true;
     cancel();
     observer.disconnect();
+    intersection?.disconnect();
     refreshEvents.forEach((event) => video.removeEventListener(event, refresh));
     stopEvents.forEach((event) => video.removeEventListener(event, stop));
     video.removeEventListener('error', cancel);
@@ -277,7 +318,7 @@ export function createVideoRenderer(
     release();
   };
   return Object.assign(dispose, {
-    setMode(next: MatchingMode) { mode = next; draw(); },
+    setMode(next: MatchingMode) { if (disposed || next === mode) return; mode = next; draw(); },
     updateSettings(next: AsciiSettings) {
       if (disposed) return;
       const normalized = normalizeSettings(next);

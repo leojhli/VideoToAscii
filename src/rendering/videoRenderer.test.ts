@@ -15,6 +15,7 @@ function mockGL() {
   for (const name of ['deleteShader', 'deleteProgram', 'deleteTexture', 'deleteVertexArray', 'shaderSource', 'compileShader', 'attachShader', 'linkProgram', 'useProgram', 'bindVertexArray', 'activeTexture', 'bindTexture', 'texParameteri', 'pixelStorei', 'uniform1i', 'clearColor', 'clear', 'viewport', 'texImage2D', 'drawArrays', 'uniform2f', 'deleteFramebuffer', 'bindFramebuffer', 'framebufferTexture2D', 'disable']) gl[name] = vi.fn();
   gl.checkFramebufferStatus = vi.fn(() => gl.FRAMEBUFFER_COMPLETE);
   gl.uniform1f = vi.fn();
+  gl.texSubImage2D = vi.fn();
   gl.uniform3fv = vi.fn();
   gl.getShaderParameter = vi.fn(() => true);
   gl.getProgramParameter = vi.fn(() => true);
@@ -52,12 +53,104 @@ beforeEach(() => {
 afterEach(() => { dispose?.(); dispose = undefined; vi.restoreAllMocks(); vi.unstubAllGlobals(); });
 
 describe('WebGL video renderer', () => {
-  it('caps a 500-column request to readable density without reloading programs', () => {
+  it('draws detached export targets at fixed dimensions and calls the capture hook', () => {
+    vi.mocked(canvas.getBoundingClientRect).mockReturnValue({ width: 0, height: 0 } as DOMRect);
+    const capture = vi.fn();
+    const grid = vi.fn();
+    dispose = createVideoRenderer(canvas, video, vi.fn(), vi.fn(), grid, { width: 1920, height: 1080, onFrame: capture });
+    expect(canvas.width).toBe(1920);
+    expect(canvas.height).toBe(1080);
+    expect(grid).toHaveBeenLastCalledWith({ columns: 180, rows: 61 });
+    expect(capture).toHaveBeenCalledOnce();
+    dispose();
+    video.dispatchEvent(new Event('seeked'));
+    expect(capture).toHaveBeenCalledOnce();
+  });
+  it('caps drawing-buffer dimensions and device-pixel ratio', () => {
+    vi.stubGlobal('devicePixelRatio', 4);
+    dispose = createVideoRenderer(canvas, video, vi.fn(), vi.fn());
+    expect(canvas.width).toBe(1600);
+    expect(canvas.height).toBe(1200);
+    vi.mocked(canvas.getBoundingClientRect).mockReturnValue({ width: 6000, height: 4000 } as DOMRect);
+    video.dispatchEvent(new Event('resize'));
+    expect(canvas.width).toBe(4096);
+    expect(canvas.height).toBeLessThanOrEqual(4096);
+  });
+
+  it('skips unchanged video frames in the animation-frame fallback', () => {
+    Object.defineProperty(video, 'requestVideoFrameCallback', { value: undefined });
+    let callback: FrameRequestCallback = () => {};
+    vi.stubGlobal('requestAnimationFrame', vi.fn((next) => { callback = next; return 9; }));
+    vi.stubGlobal('cancelAnimationFrame', vi.fn());
+    dispose = createVideoRenderer(canvas, video, vi.fn(), vi.fn());
+    callback(0);
+    callback(34);
+    expect(gl.drawArrays).toHaveBeenCalledTimes(2);
+    video.currentTime = 1;
+    callback(68);
+    expect(gl.drawArrays).toHaveBeenCalledTimes(4);
+    expect(gl.texSubImage2D).toHaveBeenCalledOnce();
+  });
+  it('stops offscreen rendering and disconnects its intersection observer', () => {
+    let notify: (entries: { isIntersecting: boolean }[]) => void = () => {};
+    const disconnectIntersection = vi.fn();
+    vi.stubGlobal('IntersectionObserver', class {
+      constructor(callback: typeof notify) { notify = callback; }
+      observe = vi.fn(); disconnect = disconnectIntersection;
+    });
+    dispose = createVideoRenderer(canvas, video, vi.fn(), vi.fn());
+    notify([{ isIntersecting: false }]);
+    video.dispatchEvent(new Event('seeked'));
+    expect(gl.drawArrays).toHaveBeenCalledTimes(2);
+    expect(video.cancelVideoFrameCallback).toHaveBeenCalled();
+    notify([{ isIntersecting: true }]);
+    expect(gl.drawArrays).toHaveBeenCalledTimes(4);
+    dispose(); dispose = undefined;
+    expect(disconnectIntersection).toHaveBeenCalledOnce();
+  });
+
+  it('reuses paused textures and uniform locations, then updates changed frames in place', () => {
+    dispose = createVideoRenderer(canvas, video, vi.fn(), vi.fn());
+    const lookupCount = vi.mocked(gl.getUniformLocation).mock.calls.length;
+    const allocations = vi.mocked(gl.texImage2D).mock.calls.length;
+    video.dispatchEvent(new Event('seeked'));
+    expect(gl.getUniformLocation).toHaveBeenCalledTimes(lookupCount);
+    expect(gl.texImage2D).toHaveBeenCalledTimes(allocations);
+    expect(gl.texSubImage2D).not.toHaveBeenCalled();
+    video.currentTime = 1;
+    video.dispatchEvent(new Event('seeked'));
+    expect(gl.texSubImage2D).toHaveBeenCalledOnce();
+    expect(gl.texImage2D).toHaveBeenCalledTimes(allocations);
+  });
+
+  it('caps callback-driven playback at 30fps but redraws explicit seek events', () => {
+    dispose = createVideoRenderer(canvas, video, vi.fn(), vi.fn());
+    frame(0, {} as VideoFrameCallbackMetadata);
+    frame(10, {} as VideoFrameCallbackMetadata);
+    frame(20, {} as VideoFrameCallbackMetadata);
+    expect(gl.drawArrays).toHaveBeenCalledTimes(4);
+    frame(34, {} as VideoFrameCallbackMetadata);
+    expect(gl.drawArrays).toHaveBeenCalledTimes(6);
+    video.dispatchEvent(new Event('seeked'));
+    expect(gl.drawArrays).toHaveBeenCalledTimes(8);
+  });
+
+  it('does not render or schedule when the canvas has no area', () => {
+    vi.mocked(canvas.getBoundingClientRect).mockReturnValue({ width: 0, height: 0 } as DOMRect);
+    dispose = createVideoRenderer(canvas, video, vi.fn(), vi.fn());
+    expect(gl.drawArrays).not.toHaveBeenCalled();
+    expect(video.requestVideoFrameCallback).not.toHaveBeenCalled();
+    vi.mocked(canvas.getBoundingClientRect).mockReturnValue({ width: 800, height: 600 } as DOMRect);
+    video.dispatchEvent(new Event('resize'));
+    expect(gl.drawArrays).toHaveBeenCalledTimes(2);
+    expect(video.requestVideoFrameCallback).toHaveBeenCalled();
+  });
+  it('preserves selected density without reloading programs', () => {
     Object.defineProperty(video, 'paused', { value: true });
     const renderer = createVideoRenderer(canvas, video, vi.fn(), vi.fn());
     dispose = renderer;
     renderer.updateSettings({ ...DEFAULT_SETTINGS, columns: 500, gamma: 2, opacity: .5 });
-    expect(canvas.dataset.grid).toBe('100 × 34');
+    expect(canvas.dataset.grid).toBe('500 × 169');
     expect(canvas.style.opacity).toBe('0.5');
     expect(gl.createProgram).toHaveBeenCalledTimes(2);
     expect(gl.drawArrays).toHaveBeenCalledTimes(4);

@@ -85,3 +85,6 @@ footer { display: flex; justify-content: space-between; gap: 20px; padding: 30px
   .gpu-preview { height: 260px; }
   .preview-status, footer { flex-wrap: wrap; }
 }
+.export-controls { padding: 20px; border-top: 1px solid #30343a; }
+.export-controls > button, .export-controls > a { margin: 0 14px 10px 0; }
+.export-controls > a { color: var(--accent, #b6f36a); }
