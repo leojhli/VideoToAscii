@@ -1,8 +1,8 @@
 # Video to ASCII
 
-A React learning project, built one milestone at a time. The destination is a reusable **WebGL2 video-to-ASCII renderer** and a standalone playground for tuning it.
+A React and TypeScript app for converting video into ASCII using WebGL2, with a reusable renderer and a standalone playground for tuning it.
 
-The app includes a reusable `VideoAscii` component, a standalone portfolio example, live image controls, readable resolution limits, and fullscreen viewing. Milestone 6 adds offscreen suspension, a playback frame cap, and GPU resource reuse. Edge is verified; Firefox/WebKit verification remains pending due to browser download failures in the development environment.
+The app includes a reusable `VideoAscii` component, a standalone portfolio example, live image controls, video downloads, and fullscreen viewing. Offscreen suspension, a playback frame cap, and GPU resource reuse keep rendering efficient. Edge is verified; Firefox/WebKit verification remains pending due to browser download failures in the development environment.
 
 ## Performance and compatibility
 
@@ -95,18 +95,14 @@ The build checks TypeScript and creates deployable files in dist/. Preview serve
 - `src/styles.css`: responsive styling with system fonts and no external assets.
 - `src/App.test.tsx`: selection and lifecycle tests.
 - `src/rendering/videoRenderer.test.ts` and `tests/browser/video.spec.ts`: renderer lifecycle and actual browser rendering checks.
-- `PROJECT_CONTEXT.md`: long-term decisions, milestone state, and roadmap for future chats.
-- `AGENTS.md`: instructions for assistants continuing the project.
 
 ## Manual checks
 
 Select a real video, play/pause/seek, and confirm its dimensions and duration. Replace it, select the same file again, then remove it. Try an empty file and an unplayable video. Resize to a narrow viewport and navigate the controls with the keyboard.
 
-## Learning references
+## References
 
 - [Vite: getting started](https://vite.dev/guide/)
 - [React: useEffect and cleanup](https://react.dev/reference/react/useEffect)
 - [MDN: releasing object URLs](https://developer.mozilla.org/en-US/docs/Web/API/URL/revokeObjectURL_static)
 - [MDN: video textures in WebGL](https://developer.mozilla.org/en-US/docs/Web/API/WebGL_API/Tutorial/Animating_textures_in_WebGL)
-
-Context files are part of this local Git repository. Commit and push them when ready to make them available on GitHub.
