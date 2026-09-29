@@ -75,8 +75,62 @@ test('renders a real video upright through WebGL and survives pause, resize, con
   expect(await page.locator('video').getAttribute('src')).toBe(sourceBefore);
   await page.getByLabel('Character matching').selectOption('shape');
   expect((await sample()).fingerprint).toBe(shapeFrame);
+  const slider = async (name: string, value: string) => {
+    await page.getByRole('slider', { name, exact: true }).fill(value);
+  };
+  const maxResolution = async () => (await page.getByRole('slider', { name: 'Resolution (columns)', exact: true }).getAttribute('max'))!;
+  await slider('Resolution (columns)', await maxResolution());
+  const readableColumns = async () => page.locator('canvas').evaluate((canvas) => {
+    const video = document.querySelector('video')!;
+    const rect = canvas.getBoundingClientRect();
+    const visibleWidth = Math.min(rect.width, rect.height * video.videoWidth / video.videoHeight);
+    const columns = Number((canvas as HTMLCanvasElement).dataset.grid!.split(' × ')[0]);
+    return { columns, cellWidth: visibleWidth / columns };
+  });
+  expect((await readableColumns()).cellWidth).toBeGreaterThanOrEqual(8);
+  await page.setViewportSize({ width: 390, height: 844 });
+  await expect.poll(async () => (await readableColumns()).cellWidth).toBeGreaterThanOrEqual(8);
+  await page.setViewportSize({ width: 1280, height: 720 });
+  await page.getByRole('button', { name: 'Reset settings' }).click();
+  const baseline = (await sample()).fingerprint;
+  for (const [name, value] of [['Brightness', '0.5'], ['Contrast', '0.5'], ['Gamma', '2']]) {
+    await slider(name, value);
+    expect((await sample()).fingerprint).not.toBe(baseline);
+    await page.getByRole('button', { name: 'Reset settings' }).click();
+  }
+  await slider('Opacity', '0.4');
+  await expect(page.locator('canvas')).toHaveCSS('opacity', '0.4');
+  await page.getByLabel('Color mode').selectOption('monochrome');
+  await page.getByLabel('Foreground color').fill('#00ff00');
+  expect((await sample()).top.peak).toBeLessThan(5);
+  await page.getByLabel('Background color').fill('#ff0000');
+  expect((await sample()).top.peak).toBeGreaterThan(200);
+  await page.getByRole('button', { name: 'Reset settings' }).click();
+  await page.getByLabel('Character preset').selectOption('Binary');
+  expect((await sample()).fingerprint).not.toBe(baseline);
+  await page.getByLabel('Custom characters').fill(' .@');
+  await page.getByRole('button', { name: 'Apply characters' }).click();
+  expect((await sample()).gpuError).toBe(0);
+  await page.getByRole('button', { name: 'Reset settings' }).click();
+  expect((await sample()).fingerprint).toBe(baseline);
+  expect(await page.locator('video').getAttribute('src')).toBe(sourceBefore);
   expect((await sample()).gpuError).toBe(0);
   await expect(page.locator('video')).toBeHidden();
+  const inlineWidth = await page.locator('canvas').evaluate((canvas) => canvas.getBoundingClientRect().width);
+  await slider('Resolution (columns)', await maxResolution());
+  const gridBeforeFullscreen = (await readableColumns()).columns;
+  await page.getByRole('button', { name: 'Fullscreen', exact: true }).click();
+  await expect.poll(() => page.evaluate(() => document.fullscreenElement?.className)).toBe('preview-stage');
+  await expect(page.getByRole('button', { name: 'Exit fullscreen' })).toBeVisible();
+  await expect.poll(() => page.locator('canvas').evaluate((canvas) => canvas.getBoundingClientRect().width)).toBeGreaterThan(inlineWidth);
+  await expect.poll(async () => (await readableColumns()).columns).toBeGreaterThan(gridBeforeFullscreen);
+  expect((await readableColumns()).cellWidth).toBeGreaterThanOrEqual(8);
+  await expect.poll(async () => (await readableColumns()).columns).toBe(Number(await maxResolution()));
+  expect(await page.locator('video').getAttribute('src')).toBe(sourceBefore);
+  expect((await sample()).gpuError).toBe(0);
+  await page.getByRole('button', { name: 'Exit fullscreen' }).click();
+  await expect.poll(() => page.evaluate(() => document.fullscreenElement)).toBeNull();
+  await expect(page.getByRole('button', { name: 'Fullscreen', exact: true })).toHaveAttribute('aria-pressed', 'false');
   await page.setViewportSize({ width: 390, height: 844 });
   await expect.poll(async () => (await sample()).top.peak).toBeGreaterThan(100);
 
@@ -91,5 +145,13 @@ test('renders a real video upright through WebGL and survives pause, resize, con
   expect((await sample()).gpuError).toBe(0);
   await page.getByRole('button', { name: 'Remove video' }).click();
   await expect(page.locator('canvas')).toHaveCount(0);
+  await page.route((url) => url.pathname === '/integration-fixture.webm', (route) => route.fulfill({ contentType: 'video/webm', body: Buffer.from(bytes) }));
+  await page.goto('/examples/portfolio.html?src=/integration-fixture.webm');
+  await expect(page.getByRole('img', { name: 'WebGL Portfolio background' })).toBeVisible();
+  await expect.poll(() => page.locator('video').evaluate((video: HTMLVideoElement) => video.currentTime)).toBeGreaterThan(0);
+  await expect.poll(async () => (await sample()).top.peak).toBeGreaterThan(100);
+  await expect(page.getByRole('button')).toHaveCount(0);
+  expect(await page.locator('video').evaluate((video: HTMLVideoElement) => video.loop && video.muted)).toBe(true);
+  await expect(page.getByRole('alert')).toHaveCount(0);
   expect(exceptions).toEqual([]);
 });

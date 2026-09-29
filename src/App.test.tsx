@@ -3,7 +3,7 @@ import { cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import App from './App';
 
-vi.mock('./rendering/videoRenderer', () => ({ createVideoRenderer: vi.fn(() => vi.fn()) }));
+vi.mock('./rendering/videoRenderer', () => ({ createVideoRenderer: vi.fn(() => Object.assign(vi.fn(), { updateSettings: vi.fn(), setMode: vi.fn() })) }));
 
 let nextUrl = 0;
 const createUrl = vi.fn(() => `blob:test-${++nextUrl}`);
@@ -31,6 +31,19 @@ function select(file: File) {
 }
 
 describe('local video selection', () => {
+  it('changes resolution, validates custom characters, and resets the controls', () => {
+    render(<App />);
+    select(new File(['video'], 'clip.mp4', { type: 'video/mp4' }));
+    const resolution = screen.getByRole('slider', { name: 'Resolution (columns)' }) as HTMLInputElement;
+    fireEvent.change(resolution, { target: { value: '500' } });
+    expect(resolution.value).toBe('500');
+    fireEvent.change(screen.getByLabelText('Custom characters'), { target: { value: '' } });
+    fireEvent.click(screen.getByText('Apply characters'));
+    expect(screen.getByRole('alert').textContent).toContain('at least two');
+    fireEvent.click(screen.getByText('Reset settings'));
+    expect(resolution.value).toBe('180');
+    expect(screen.queryByRole('alert')).toBeNull();
+  });
   it('releases replaced and removed URLs and allows choosing the same file again', () => {
     render(<App />);
     const file = new File(['video'], 'clip.mp4', { type: 'video/mp4' });

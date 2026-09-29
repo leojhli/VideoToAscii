@@ -1,10 +1,25 @@
 export const GLYPH_WIDTH = 12;
 export const GLYPH_HEIGHT = 20;
+export const MIN_CHARACTER_WIDTH = 8;
+
+export function readableGrid(width: number, height: number, columns: number, previewWidth: number, previewHeight: number) {
+  const fit = Math.min(previewWidth / Math.max(1, width), previewHeight / Math.max(1, height));
+  const limit = Math.max(1, Math.floor(width * fit / MIN_CHARACTER_WIDTH));
+  return characterGrid(width, height, Math.min(columns, limit));
+}
 export const DEFAULT_CHARACTERS = ' .,:;!iIl|/\\-_+~=()[]{}<>?tfjrxnuvczXYUJCLQ0OZmwqpdbkhao*#MW&8%B@$';
 
-export function characterGrid(width: number, height: number, columns = 100) {
-  const cols = Math.max(1, Math.min(200, Math.round(columns)));
-  return { columns: cols, rows: Math.max(1, Math.min(400, Math.round(cols * height / width * GLYPH_WIDTH / GLYPH_HEIGHT))) };
+export function characterGrid(width: number, height: number, columns = 180) {
+  const ratio = Math.max(1, height) / Math.max(1, width) * GLYPH_WIDTH / GLYPH_HEIGHT;
+  const cols = Math.max(1, Math.min(500, Math.round(columns), Math.floor(1000 / ratio)));
+  return { columns: cols, rows: Math.max(1, Math.min(1000, Math.round(cols * ratio))) };
+}
+
+export function normalizeCharacters(value: string) {
+  if (/[^\x20-\x7e]/.test(value)) throw new Error('Use printable ASCII characters only (including spaces).');
+  const characters = Array.from(new Set(value)).join('');
+  if (characters.length < 2 || !characters.trim()) throw new Error('Enter at least two different characters, including a visible character.');
+  return characters;
 }
 
 // Six spatial averages, bottom row first to match WebGL texture coordinates.
@@ -27,7 +42,7 @@ export function normalizeShape(values: number[]) {
   return values.map((value) => (value - mean) / deviation);
 }
 
-export function createGlyphAtlas() {
+export function createGlyphAtlas(characterSet = DEFAULT_CHARACTERS) {
   const tile = document.createElement('canvas');
   tile.width = GLYPH_WIDTH;
   tile.height = GLYPH_HEIGHT;
@@ -37,7 +52,7 @@ export function createGlyphAtlas() {
   context.textAlign = 'center';
   context.textBaseline = 'alphabetic';
   context.fillStyle = 'white';
-  const glyphs = Array.from(DEFAULT_CHARACTERS).map((character) => {
+  const glyphs = Array.from(normalizeCharacters(characterSet)).map((character) => {
     context.clearRect(0, 0, GLYPH_WIDTH, GLYPH_HEIGHT);
     context.fillText(character, GLYPH_WIDTH / 2, 15);
     const image = context.getImageData(0, 0, GLYPH_WIDTH, GLYPH_HEIGHT);

@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createVideoRenderer } from './videoRenderer';
+import { DEFAULT_SETTINGS } from './settings';
 
 vi.mock('./glyphAtlas', async (original) => ({
   ...await original<typeof import('./glyphAtlas')>(),
@@ -13,6 +14,8 @@ function mockGL() {
   for (const name of ['createShader', 'createProgram', 'createTexture', 'createVertexArray', 'createFramebuffer', 'getUniformLocation']) gl[name] = vi.fn(() => ({}));
   for (const name of ['deleteShader', 'deleteProgram', 'deleteTexture', 'deleteVertexArray', 'shaderSource', 'compileShader', 'attachShader', 'linkProgram', 'useProgram', 'bindVertexArray', 'activeTexture', 'bindTexture', 'texParameteri', 'pixelStorei', 'uniform1i', 'clearColor', 'clear', 'viewport', 'texImage2D', 'drawArrays', 'uniform2f', 'deleteFramebuffer', 'bindFramebuffer', 'framebufferTexture2D', 'disable']) gl[name] = vi.fn();
   gl.checkFramebufferStatus = vi.fn(() => gl.FRAMEBUFFER_COMPLETE);
+  gl.uniform1f = vi.fn();
+  gl.uniform3fv = vi.fn();
   gl.getShaderParameter = vi.fn(() => true);
   gl.getProgramParameter = vi.fn(() => true);
   gl.getShaderInfoLog = vi.fn(() => 'compile error');
@@ -49,6 +52,17 @@ beforeEach(() => {
 afterEach(() => { dispose?.(); dispose = undefined; vi.restoreAllMocks(); vi.unstubAllGlobals(); });
 
 describe('WebGL video renderer', () => {
+  it('caps a 500-column request to readable density without reloading programs', () => {
+    Object.defineProperty(video, 'paused', { value: true });
+    const renderer = createVideoRenderer(canvas, video, vi.fn(), vi.fn());
+    dispose = renderer;
+    renderer.updateSettings({ ...DEFAULT_SETTINGS, columns: 500, gamma: 2, opacity: .5 });
+    expect(canvas.dataset.grid).toBe('100 × 34');
+    expect(canvas.style.opacity).toBe('0.5');
+    expect(gl.createProgram).toHaveBeenCalledTimes(2);
+    expect(gl.drawArrays).toHaveBeenCalledTimes(4);
+    expect(video.requestVideoFrameCallback).not.toHaveBeenCalled();
+  });
   it('uploads frames, fits the aspect ratio, and releases resources and callbacks', () => {
     dispose = createVideoRenderer(canvas, video, vi.fn(), vi.fn());
     expect(gl.viewport).toHaveBeenCalledWith(0, 75, 800, 450);

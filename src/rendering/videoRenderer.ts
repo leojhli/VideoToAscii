@@ -1,5 +1,7 @@
 import { vertexSource, selectionSource, displaySource } from './asciiShaders';
-import { characterGrid, createGlyphAtlas } from './glyphAtlas';
+import { readableGrid, createGlyphAtlas } from './glyphAtlas';
+import { DEFAULT_SETTINGS, normalizeSettings, rgb } from './settings';
+import type { AsciiSettings } from './settings';
 
 export type MatchingMode = 'shape' | 'luminance';
 
@@ -8,6 +10,7 @@ export function createVideoRenderer(
   video: HTMLVideoElement,
   onError: (message: string) => void,
   onReady: () => void,
+  onGrid: (grid: { columns: number; rows: number }) => void = () => {},
 ) {
   const gl = canvas.getContext('webgl2', { alpha: false, antialias: false });
   if (!gl) throw new Error('WebGL2 is unavailable. Enable hardware acceleration or try another browser.');
@@ -23,6 +26,7 @@ export function createVideoRenderer(
   let cellHeight = 0;
   let glyphCount = 0;
   let mode: MatchingMode = 'shape';
+  let settings = { ...DEFAULT_SETTINGS };
   let maxTexture = 0;
   let maxSize = 0;
   let vao: WebGLVertexArrayObject | null = null;
@@ -103,15 +107,10 @@ export function createVideoRenderer(
       program = link(displaySource);
       maxTexture = gl!.getParameter(gl!.MAX_TEXTURE_SIZE) as number;
       maxSize = Math.min(gl!.getParameter(gl!.MAX_RENDERBUFFER_SIZE) as number, 4096);
-      const atlas = createGlyphAtlas();
-      glyphCount = atlas.count;
       texture = newTexture(0, gl!.LINEAR);
       atlasTexture = newTexture(1, gl!.LINEAR);
-      gl!.pixelStorei(gl!.UNPACK_FLIP_Y_WEBGL, true);
-      gl!.texImage2D(gl!.TEXTURE_2D, 0, gl!.RGBA, gl!.RGBA, gl!.UNSIGNED_BYTE, atlas.canvas);
       descriptorTexture = newTexture(2, gl!.NEAREST);
-      gl!.pixelStorei(gl!.UNPACK_FLIP_Y_WEBGL, false);
-      gl!.texImage2D(gl!.TEXTURE_2D, 0, gl!.RGBA32F, glyphCount, 2, 0, gl!.RGBA, gl!.FLOAT, atlas.descriptors);
+      uploadAtlas();
       cellTexture = newTexture(3, gl!.NEAREST);
       framebuffer = gl!.createFramebuffer();
       vao = gl!.createVertexArray();
@@ -130,6 +129,19 @@ export function createVideoRenderer(
       release();
       throw error;
     }
+  }
+
+  function uploadAtlas() {
+    const atlas = createGlyphAtlas(settings.characterSet);
+    glyphCount = atlas.count;
+    gl!.activeTexture(gl!.TEXTURE0 + 1);
+    gl!.bindTexture(gl!.TEXTURE_2D, atlasTexture);
+    gl!.pixelStorei(gl!.UNPACK_FLIP_Y_WEBGL, true);
+    gl!.texImage2D(gl!.TEXTURE_2D, 0, gl!.RGBA, gl!.RGBA, gl!.UNSIGNED_BYTE, atlas.canvas);
+    gl!.activeTexture(gl!.TEXTURE0 + 2);
+    gl!.bindTexture(gl!.TEXTURE_2D, descriptorTexture);
+    gl!.pixelStorei(gl!.UNPACK_FLIP_Y_WEBGL, false);
+    gl!.texImage2D(gl!.TEXTURE_2D, 0, gl!.RGBA32F, glyphCount, 2, 0, gl!.RGBA, gl!.FLOAT, atlas.descriptors);
   }
 
   function cancel() {
@@ -164,7 +176,8 @@ export function createVideoRenderer(
       const fit = Math.min(width / video.videoWidth, height / video.videoHeight);
       const viewWidth = Math.max(1, Math.round(video.videoWidth * fit));
       const viewHeight = Math.max(1, Math.round(video.videoHeight * fit));
-      const grid = characterGrid(video.videoWidth, video.videoHeight, Math.min(100, Math.max(1, Math.floor(viewWidth / dpr / 6))));
+      const grid = readableGrid(video.videoWidth, video.videoHeight, settings.columns, rect.width, rect.height);
+      canvas.dataset.grid = `${grid.columns} × ${grid.rows}`;
       gl!.bindVertexArray(vao);
       gl!.activeTexture(gl!.TEXTURE0);
       gl!.bindTexture(gl!.TEXTURE_2D, texture);
@@ -172,6 +185,7 @@ export function createVideoRenderer(
       gl!.texImage2D(gl!.TEXTURE_2D, 0, gl!.RGBA, gl!.RGBA, gl!.UNSIGNED_BYTE, video);
       gl!.bindFramebuffer(gl!.FRAMEBUFFER, framebuffer);
       if (cellWidth !== grid.columns || cellHeight !== grid.rows) {
+        onGrid(grid);
         cellWidth = grid.columns;
         cellHeight = grid.rows;
         gl!.activeTexture(gl!.TEXTURE0 + 3);
@@ -184,14 +198,21 @@ export function createVideoRenderer(
       gl!.useProgram(selectionProgram);
       gl!.uniform2f(gl!.getUniformLocation(selectionProgram!, 'grid'), cellWidth, cellHeight);
       gl!.uniform1i(gl!.getUniformLocation(selectionProgram!, 'shapeMode'), mode === 'shape' ? 1 : 0);
+      gl!.uniform1i(gl!.getUniformLocation(selectionProgram!, 'glyphCount'), glyphCount);
+      for (const name of ['brightness', 'contrast', 'gamma'] as const) gl!.uniform1f(gl!.getUniformLocation(selectionProgram!, name), settings[name]);
       gl!.drawArrays(gl!.TRIANGLES, 0, 3);
 
       gl!.bindFramebuffer(gl!.FRAMEBUFFER, null);
-      gl!.clearColor(0, 0, 0, 1);
+      const [r, g, b] = rgb(settings.backgroundColor);
+      gl!.clearColor(r, g, b, 1);
       gl!.clear(gl!.COLOR_BUFFER_BIT);
       gl!.viewport(Math.floor((width - viewWidth) / 2), Math.floor((height - viewHeight) / 2), viewWidth, viewHeight);
       gl!.useProgram(program);
       gl!.uniform2f(gl!.getUniformLocation(program!, 'grid'), cellWidth, cellHeight);
+      gl!.uniform1i(gl!.getUniformLocation(program!, 'glyphCount'), glyphCount);
+      gl!.uniform1i(gl!.getUniformLocation(program!, 'monochrome'), settings.colorMode === 'monochrome' ? 1 : 0);
+      gl!.uniform3fv(gl!.getUniformLocation(program!, 'foreground'), rgb(settings.foregroundColor));
+      gl!.uniform3fv(gl!.getUniformLocation(program!, 'background'), rgb(settings.backgroundColor));
       gl!.drawArrays(gl!.TRIANGLES, 0, 3);
     } catch (error) {
       report(error);
@@ -255,5 +276,18 @@ export function createVideoRenderer(
     canvas.removeEventListener('webglcontextrestored', contextRestored);
     release();
   };
-  return Object.assign(dispose, { setMode(next: MatchingMode) { mode = next; draw(); } });
+  return Object.assign(dispose, {
+    setMode(next: MatchingMode) { mode = next; draw(); },
+    updateSettings(next: AsciiSettings) {
+      if (disposed) return;
+      const normalized = normalizeSettings(next);
+      const changed = normalized.characterSet !== settings.characterSet;
+      settings = normalized;
+      canvas.style.opacity = String(settings.opacity);
+      if (changed && !lost && !failed) {
+        try { uploadAtlas(); } catch (error) { report(error); }
+      }
+      draw();
+    },
+  });
 }

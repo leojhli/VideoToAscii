@@ -1,11 +1,18 @@
 import { describe, expect, it } from 'vitest';
-import { characterGrid, glyphFeatures, normalizeShape } from './glyphAtlas';
+import { characterGrid, readableGrid, glyphFeatures, normalizeShape } from './glyphAtlas';
 
 describe('ASCII grid and glyph descriptors', () => {
+  it('caps density by visible size and allows more columns in fullscreen', () => {
+    expect(readableGrid(1920, 1080, 500, 800, 600).columns).toBe(100);
+    expect(readableGrid(1920, 1080, 500, 1920, 1080).columns).toBe(240);
+    expect(readableGrid(1080, 1920, 500, 1920, 1080).columns).toBe(75);
+    expect(readableGrid(1920, 1080, 40, 1920, 1080).columns).toBe(40);
+  });
   it('corrects for tall glyphs in landscape and portrait video', () => {
-    expect(characterGrid(1920, 1080)).toEqual({ columns: 100, rows: 34 });
-    expect(characterGrid(1080, 1920)).toEqual({ columns: 100, rows: 107 });
-    expect(characterGrid(1, 10000, 10000)).toEqual({ columns: 200, rows: 400 });
+    expect(characterGrid(1920, 1080, 100)).toEqual({ columns: 100, rows: 34 });
+    expect(characterGrid(1080, 1920, 100)).toEqual({ columns: 100, rows: 107 });
+    expect(characterGrid(1920, 1080, 500)).toEqual({ columns: 500, rows: 169 });
+    expect(characterGrid(1, 10000, 10000)).toEqual({ columns: 1, rows: 1000 });
   });
   it('extracts spatial coverage bottom-up rather than losing orientation', () => {
     const pixels = new Uint8ClampedArray(2 * 3 * 4);

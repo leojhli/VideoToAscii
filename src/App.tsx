@@ -34,7 +34,7 @@ export default function App() {
       </header>
 
       <section className="intro">
-        <p className="eyebrow">03 / MOTION INTO CHARACTERS</p>
+        <p className="eyebrow">05 / READY FOR YOUR PORTFOLIO</p>
         <h1>Your video.<br />A thousand characters<span className="accent">.</span></h1>
         <p className="lede">Turn a local clip into colored ASCII, rendered live in your browser.</p>
       </section>
@@ -73,7 +73,7 @@ export default function App() {
         </div>
       </section>
 
-      <footer><span>ON YOUR DEVICE. IN YOUR CONTROL.</span><span>Next up / Live image controls</span></footer>
+      <footer><span>ON YOUR DEVICE. IN YOUR CONTROL.</span><span>Next up / Performance & polish</span></footer>
     </main>
   );
 }

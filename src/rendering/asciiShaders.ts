@@ -16,6 +16,9 @@ uniform sampler2D descriptors;
 uniform vec2 grid;
 uniform int glyphCount;
 uniform int shapeMode;
+uniform float brightness;
+uniform float contrast;
+uniform float gamma;
 out vec4 color;
 void main() {
   vec2 cell = floor(gl_FragCoord.xy);
@@ -31,6 +34,7 @@ void main() {
           block += texture(videoTexture, (cell + offset) / grid).rgb * 0.25;
         }
       }
+      block = pow(clamp((block * brightness - 0.5) * contrast + 0.5, 0.0, 1.0), vec3(1.0 / gamma));
       float light = dot(block, vec3(0.2126, 0.7152, 0.0722));
       samples[y * 2 + x] = light;
       mean += light / 6.0;
@@ -64,6 +68,9 @@ precision highp float;
 in vec2 uv;
 uniform sampler2D cells;
 uniform sampler2D atlas;
+uniform int monochrome;
+uniform vec3 foreground;
+uniform vec3 background;
 uniform vec2 grid;
 uniform int glyphCount;
 out vec4 color;
@@ -76,5 +83,5 @@ void main() {
   vec2 inset = 0.5 / vec2(12.0, 20.0);
   local = clamp(local, inset, 1.0 - inset);
   float ink = texture(atlas, vec2((index + local.x) / float(glyphCount), local.y)).a;
-  color = vec4(cell.gba * ink, 1.0);
+  color = vec4(mix(background, monochrome == 1 ? foreground : cell.gba, ink), 1.0);
 }`;
